@@ -1,0 +1,83 @@
+services:
+
+  # Backend контейнер
+  backend:
+    build: ./docker/backend
+    ports:
+      - 5000:5000
+    env_file:
+       - .env
+    volumes:
+      - ./docker/backend:/srv/app
+    #command: uvicorn src.main:app --reload --host 0.0.0.0 --port 5000 --root-path="/api"
+    command: fastapi dev src/main.py --port 5000 --host 0.0.0.0 --root-path="/api"
+    links:
+      - db
+    #  - redis
+    depends_on:
+      - db
+    #  - redis
+
+  # Frontend контейнер
+  frontend:
+    build: ./docker/frontend
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - 3000:3000
+      - 5173:5173
+    volumes:
+      - ./docker/frontend:/srv/app 
+      - '/srv/app/node_modules'
+    command: npm run dev
+    depends_on:
+      - backend
+
+  # redis контейнер для вебсервера
+  #redis:
+  #  image: redis:latest
+
+  # Nginx контейнер для вебсервера
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/backend/media:/var/www/media
+      - ./docker/frontend:/var/www
+      - ./docker/nginx/conf.d/:/etc/nginx/conf.d/ 
+    depends_on:
+      - backend
+      - frontend
+
+  # Postgres контейнер
+  db:
+    image: postgres:latest
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - PGDATA=/var/lib/postgresql/data/db
+    volumes:
+      - dbdata:/var/lib/postgresql/data # Используем именованный том из блока volumes
+      - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf # Передаем в контейнер конфигурационный файл
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h ${POSTGRES_HOSTNAME}'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+# Тома
+volumes:
+  # Чтобы данные БД не пропадали после выключения создаем именованный том
+  dbdata:
+    driver: local
+
